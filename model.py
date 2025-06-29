@@ -39,5 +39,16 @@ class TransformerBlock(nn.Module):
         x = x + self.attention(self.layernorm1(x), mask) #here we are treating self.attention as a function because it is both object and function due to inheriting the properites of nn.Module (super()) which inheritly allows any object to be called as a function defined by applying the forward function of whatever class the object belongs to. 
         x = x + self.ff(self.layernorm2(x))
         return x 
+class GPT(nn.Module):
+    def __init__(self, vocab_size: int, context_length: int = 128, tokenvector_dimension: int = 512, numberofheads: int = 8, nlayers: int = 6, dropping_probability: float = 0.1):
+        super().__init__()
+        self.context_length = context_length
+        self.tokenembedding= nn.Embedding(vocab_size, tokenvector_dimension) #nn.Embedding creathes a method that expands an input of BxT to an output BxTxD by creating a matrix of vocab_size x token_vectordimension where the first rows correspond to token vector ID and contains the embedding vector for that tokenvector. So row i will contain the embedding vector for token with id "i". nn.Emebedding uses this matrix to look up embedding vectors for the tokens in its BxT matrix and expands to BxTxD
+        self.position_information = nn.Parameter(torch.randn(1, context_length, tokenvector_dimension)) #creates a random tensor which nn.Parameter marks as a parameter that can be learned upon. This random tensor stores information about what it would mean for a token to at position "i" in a sequence. It is a learnable hence why nn.Parameter was applied.
+        self.layers = nn.Sequential(
+            *[TransformerBlock(tokenvector_dimension, numberofheads, dropping_probability) for i in nlayers]) #creates one big layer which runs the layers one after the other (Sequential). The star puts each layer as a single parameter of Sequential (so it runs Sequenial(a,b,c) instead of Sequential([a,b,c]) which would result in an error)
+        self.finallayer = nn.LayerNorm(tokenvector_dimension)
+        self.fitting = nn.Linear(tokenvector_dimension, vocab_size, Bias = False) #this is a learnable for how much each token in the vocab would "fit next" given an input context vector
+        self.fitting.weight = self.tokenembedding.weight #this sets the two weight matrices equal 
 
 
