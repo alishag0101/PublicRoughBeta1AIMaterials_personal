@@ -16,5 +16,28 @@ class MultiHeadSelfAttention(nn.Module): #when defining new classes, we can have
         q_batch = q.view(B,T, self.h, self.d_k).transpose(1,2) #B, H, T, D_k
         k_batch = k.view(B,T, self.h, self.d_k).transpose(1,2)
         v_batch = v.view(B,T, self.h, self.d_k).transpose(1,2)
-        similarity_qk = q_batch @ k_batch.transpose(3,4) #so we're getting the similiarity between q and k by taking the dot product or matrix multiply of them (the syntax for that is @). We have to transpose to get the inner dimensions to lay out. This ends up as a BxHxTxT tensor
-        
+        similarity_qk = q_batch @ k_batch.transpose(3,4) #so we're getting the similiarity between q and k by taking the dot product or matrix multiply of them (the syntax for that is @). We have to transpose to get the inner dimensions to lay out. This ends up as a BxHxTxT tensors
+        probabilitydropped = similarity_qk.masked_fill(mask == 0, -1e4) #masked_fill is a PyTorch method that drops the probability (-1e4) for a_{ij} in the source matrix (similiarityqk) when the entry of mask (a matrix of 0s and 1s) in mask_ij is equal to the condition in the first parameter (so when mask_{ij} = 0 then the weight attatched to how much attention q #i pays to k #j drops very low).
+        summingoverkeys = probabilitydropped.softmax(dim = -1) #this softmax basically turns a_ij = e^{a_ij}/sum(e^{ik}). so for every quiery i, it first calculates the sum of e^{a_ij} for all j (so for every entry in the row). Then divides e^{a_ij} by it for every a_{ij} in the ith row. Then the ith row sums to one and each row becomes a mini probability distribution for how much attention the quiery of that row pays to the keys.
+        finalqk = self.drop(summingoverkeys) #this just drops some dropping_probability percentage of entries to zero to avoid overfitting (it creates the mask matrix where the dropping probability or prob of entry being 0 is dropping probability). there are two diff masks tho - this is the dropping mask and the one in line 20 was the padding mask.
+        valueextraction = finalqk @ v_batch #This will have B,H, T, D_k because we have B,H,T,T @ B,H,T,D_k so we only have to look at T,T @ T,D_k which is a T,D_k submatrix so the total matix will be B, H, T, D_k
+        final = valueextraction.transpose(1,2).contingious().view(B, T, D) #we want to contract the heads and dimension per heads dimensions into one so we bring them both to end (spots 3 and 4 by the transpose). Then we apply contigious as a contigious tensor is required for view to work and then we change the shape of tensor with view. 
+        return self.recombine(final) #applies matrix weights to final so we can update it and learn the best way to recombin the heads 
+class TransformerBlock(nn.Module):
+    def __init__(self, tokenvector_dimension: int, numberofheads: int, dropping_probability: float)
+        super().__init__()
+        self.layernorm1 = nn.LayerNorm(tokenvector_dimension) #this just makes the embedding vector numbers for each indiviual token have zero mean and a spread of 1
+        self.attention = MultiHeadSelfAttention(tokenvector_dimension, numberofheads, dropping_probability)
+        self.layernorm2 = nn.LayerNorm(tokenvector_dimension)
+        self.ff = nn.Sequential( #the feed forward network is a sequence of linear and non linear operators that adjust the numbers inside of each indivual token vector embedding (so that we can back prop and adjust weights later), independent of context (so no attention).
+            nn.Linear(tokenvector_dimension, 4 * tokenvector_dimension), #a widening matrix, linear transformation 1 
+            nn.GELU(), #a non linear transformation
+            nn.Linear(tokenvector_dimension, tokenvector_dimension), #a contracting matrix, linear transformation 2
+            nn.Dropout
+        )
+    def forward(self, x, mask):
+        x = x + self.attention(self.layernorm1(x), mask) #here we are treating self.attention as a function because it is both object and function due to inheriting the properites of nn.Module (super()) which inheritly allows any object to be called as a function defined by applying the forward function of whatever class the object belongs to. 
+        x = x + self.ff(self.layernorm2(x))
+        return x 
+
+
